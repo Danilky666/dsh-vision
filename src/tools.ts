@@ -4,7 +4,7 @@
 // text-only main model needs — a numbered inventory (map), answers and
 // verbatim text (read), and targeted crops (zoom).
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
@@ -13,7 +13,8 @@ import { parseElements, parseRegion, positionLabel } from './bbox.js'
 import { normToPx, pxToNormOfOriginal } from './coords.js'
 import { regionFor } from './crop.js'
 import { imageDiff } from './diff.js'
-import { encodePng, decodePng } from './png.js'
+import { decodeImage, readImageInfo } from './image.js'
+import { encodePng } from './png.js'
 import { readImageDims, prepareUpload, prepareCropUpload, ImageError } from './preprocess.js'
 import { checkPrompt, mapPrompt, readAskPrompt, readStripPrompt, readTranscribePrompt, zoomPrompt } from './prompts.js'
 import { VisualMemory, RegistryError } from './registry.js'
@@ -36,6 +37,9 @@ function errorText(error: unknown): string {
 }
 
 const VERDICT_VALUES = ['supported', 'contradicted', 'unverifiable'] as const
+
+/** Content-addressed DSH attachment cache: no annotation siblings there. */
+const ATTACHMENT_CACHE = /[\\/]\.dsh[\\/]attachments[\\/]/
 
 export interface Verdict {
   claim: string
@@ -115,11 +119,11 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
     description:
       'Annotate an image into a numbered inventory: every distinct interactive or informative element (buttons, inputs, icons, headings, banners) gets an id, a label, its verbatim visible text, a confidence score, and its pixel box, and the list is kept in visual working memory. Map first: before reasoning about what an image contains or where something is, map it, then refer to elements by id ("element 7"), never by vague description. Boxes and text let you reason spatially and read elements without extra vision calls; use vision_zoom when a detail is still not legible. Optionally filter with `focus` (one kind only), or annotate only inside `region`. Boxes are not pixel-exact (model grid scaled to the image) — accurate enough to crop or zoom. A different file means a new map: ids never carry over between images.',
     parameters: {
-      image: { type: 'string', required: true, description: 'Absolute image path (PNG/JPEG/GIF/WebP).' },
+      image: { type: 'string', required: true, description: 'Absolute image path: PNG, JPEG, GIF, WebP or BMP. The format is sniffed from the bytes, so a file with no extension (a DSH attachment cache object, for example) is fine.' },
       focus: { type: 'string', description: 'Optional element kind to list only, e.g. "buttons" or "error messages".' },
-      region: { type: 'string', description: 'Optional pixel box "X1,Y1,X2,Y2" to annotate only inside (PNG only). Results stay in original-image coordinates.' },
+      region: { type: 'string', description: 'Optional pixel box "X1,Y1,X2,Y2" to annotate only inside (PNG/JPEG/GIF/BMP; WebP cannot be cropped locally). Results stay in original-image coordinates.' },
       maxItems: { type: 'integer', description: 'Maximum elements to list (default 30).' },
-      annotate: { type: 'boolean', description: 'Also write <stem>.annotated.png with boxes drawn on the image (default true; PNG only).' },
+      annotate: { type: 'boolean', description: 'Also write <stem>.annotated.png with the boxes drawn on the image (default true; any decodable format).' },
     },
     output: {
       schema: {
@@ -215,16 +219,20 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
         })
         // Annotated proof: draw the boxes on the original pixels. Never
         // overwrites an existing file — the proof belongs to the map that
-        // first wrote it.
+        // first wrote it. Content-addressed attachment cache objects are
+        // skipped: their name is a hash and the directory is a cache, so a
+        // sibling proof would only accumulate garbage.
         let annotatedPath = ''
-        if (args.annotate !== false && args.image.toLowerCase().endsWith('.png')) {
+        if (args.annotate !== false && !ATTACHMENT_CACHE.test(args.image)) {
           try {
-            const stem = basename(args.image).replace(/\.png$/i, '')
-            annotatedPath = join(dirname(args.image), `${stem}.annotated.png`)
-            if (!existsSync(annotatedPath)) {
-              const original = decodePng(readFileSync(args.image))
+            const info = readImageInfo(args.image)
+            if (info.decodable) {
+              const stem = basename(args.image).replace(/\.[^.]*$/, '') || basename(args.image)
+              const candidate = join(dirname(args.image), `${stem}.annotated.png`)
+              const original = decodeImage(info.bytes, info.format)
               const drawn = drawBoxes(original, elements.map((element) => ({ x1: element.x1, y1: element.y1, x2: element.x2, y2: element.y2 })))
-              writeFileSync(annotatedPath, encodePng(drawn))
+              if (!existsSync(candidate)) writeFileSync(candidate, encodePng(drawn))
+              annotatedPath = candidate
             }
           } catch {
             annotatedPath = '' // annotation is best-effort; the inventory stands
@@ -337,7 +345,7 @@ export function buildTools(deps: ToolDeps): ToolDefinition[] {
     description:
       'Zoom into one region of an image and answer a targeted question about it. The crop is uploaded alone, so small text, icons, and states are read at effectively full resolution — a full-image pass routinely misses them. Prefer `ref` (an id from vision_map\'s visual working memory, e.g. "7") over a raw `region` box. `scale` upscales the crop for tiny elements. Zoom is the only reliable way to inspect one element closely; if the crop is still not enough, the answer will say exactly what is missing instead of guessing.',
     parameters: {
-      image: { type: 'string', required: true, description: 'Absolute PNG path.' },
+      image: { type: 'string', required: true, description: 'Absolute image path: PNG, JPEG, GIF or BMP (format sniffed from the bytes; the extension does not matter). WebP can be read but not cropped locally.' },
       question: { type: 'string', required: true, description: 'The targeted question, e.g. "is this button enabled or greyed out?" or "what is the exact error text?".' },
       ref: { type: 'string', description: 'Element id from vision_map ("7", or "7@imageId"). Mutually exclusive with region.' },
       region: { type: 'string', description: 'Alternative raw pixel box "X1,Y1,X2,Y2" when no registry entry exists.' },

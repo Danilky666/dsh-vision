@@ -1,6 +1,6 @@
 {
   "name": "dsh-vision",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A visual working memory for DeepSeek Harness agents: map (numbered region registry), read (Q&A + verbatim text extraction), zoom (region inspection), check (claim verification), and diff (pixel comparison) backed by an OpenAI-compatible multimodal endpoint with per-task routing and free-endpoint fallback, plus a visual-memory skill.",
   "license": "MIT",
   "type": "module",

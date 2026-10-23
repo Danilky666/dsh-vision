@@ -1,4 +1,4 @@
-import { type PngImage } from './png.js';
+import type { PngImage } from './png.js';
 export declare class DiffError extends Error {
     constructor(message: string);
 }
@@ -26,4 +26,6 @@ export interface BlockDiffResult {
 export declare function blockDiff(a: PngImage, b: PngImage, tolerance?: number, blockSize?: number): BlockDiffResult;
 /** Diff two PNG files, comparing the overlapping region when sizes differ. */
 export declare function imageDiff(aPath: string, bPath: string, tolerance?: number): BlockDiffResult;
-export declare function requirePng(path: string): PngImage;
+export declare function requireImage(path: string): PngImage;
+/** @deprecated Use requireImage: the diff accepts every decodable format. */
+export declare const requirePng: typeof requireImage;

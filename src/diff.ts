@@ -1,10 +1,11 @@
 // Deterministic pixel diff with block-level aggregation. The substrate for
 // reference-vs-implementation iteration verdicts ("6.04% -> 0%") and, later,
 // surprise-gated re-mapping and screencast keyframes. Zero API cost, zero
-// dependencies — both images decode through the bundled PNG codec.
+// dependencies — both images decode through the bundled codecs, so a PNG can be
+// compared against a JPEG screenshot without converting anything first.
 
-import { readFileSync } from 'node:fs'
-import { decodePng, PngError, type PngImage } from './png.js'
+import type { PngImage } from './png.js'
+import { decodeImage, readImageInfo, ImageError } from './image.js'
 
 export class DiffError extends Error {
   constructor(message: string) {
@@ -79,8 +80,8 @@ export function blockDiff(a: PngImage, b: PngImage, tolerance = 8, blockSize = 1
 
 /** Diff two PNG files, comparing the overlapping region when sizes differ. */
 export function imageDiff(aPath: string, bPath: string, tolerance = 8): BlockDiffResult {
-  const a = requirePng(aPath)
-  const b = requirePng(bPath)
+  const a = requireImage(aPath)
+  const b = requireImage(bPath)
   if (a.width !== b.width || a.height !== b.height) {
     // Compare the overlap (top-left aligned) — the honest zero-dep fallback
     // for differing sizes; the caller sees overlapOnly and can re-capture.
@@ -106,11 +107,18 @@ export function imageDiff(aPath: string, bPath: string, tolerance = 8): BlockDif
   return blockDiff(a, b, tolerance)
 }
 
-export function requirePng(path: string): PngImage {
+export function requireImage(path: string): PngImage {
+  const info = readImageInfo(path)
+  if (!info.decodable) {
+    throw new DiffError(`${info.format.toUpperCase()} pixels cannot be decoded locally: convert the file to PNG or JPEG first (${path})`)
+  }
   try {
-    return decodePng(readFileSync(path))
+    return decodeImage(info.bytes, info.format)
   } catch (error) {
-    if (error instanceof PngError) throw new DiffError(`${path}: ${error.message}`)
+    if (error instanceof ImageError) throw new DiffError(`${path}: ${error.message}`)
     throw new DiffError(`cannot read image: ${path}`)
   }
 }
+
+/** @deprecated Use requireImage: the diff accepts every decodable format. */
+export const requirePng = requireImage

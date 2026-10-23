@@ -77,10 +77,14 @@ test('prepareUpload passes small PNGs through untouched', () => {
   assert.equal(prepared.view.viewDims.width, 100)
 })
 
-test('readImageDims rejects unsupported files with a clear error', () => {
+test('readImageDims rejects non-images with a clear error', () => {
   const textPath = join(dir, 'notes.txt')
   writeFileSync(textPath, 'not an image')
-  assert.throws(() => readImageDims(textPath), /unsupported image format/)
+  assert.throws(() => readImageDims(textPath), /unrecognized image format/)
+  // Format comes from the bytes, so an image with a text extension still works.
+  const disguised = join(dir, 'notes.jpg')
+  writeFileSync(disguised, solidPng(40, 30, [1, 2, 3, 255]))
+  assert.deepEqual(readImageDims(disguised), { width: 40, height: 30 })
 })
 
 test('cleanup', () => {

@@ -1,8 +1,7 @@
-import { type PngImage } from './png.js';
+import type { PngImage } from './png.js';
+import { ImageError } from './image.js';
 import type { ViewTransform } from './coords.js';
-export declare class ImageError extends Error {
-    constructor(message: string);
-}
+export { ImageError };
 export interface PreparedUpload {
     /** data URL ready for the vision API. */
     dataUrl: string;
@@ -19,20 +18,24 @@ export interface Dims {
     width: number;
     height: number;
 }
-export declare function readImageDims(path: string): Dims;
 /** Integer-factor mean-pool downscale: every k×k block averages to one pixel. */
 export declare function meanPoolDownscale(image: PngImage, factor: number): PngImage;
+/** Pixel size of an image file, sniffed from its bytes (orientation applied). */
+export declare function readImageDims(path: string): Dims;
 /**
- * Prepare one image path for upload. PNG gets a deterministic downscale to
- * the long-edge cap; other formats pass through with original dimensions.
+ * Prepare one image path for upload.
+ *
+ * PNG/JPEG pass through byte-for-byte when no repaint is needed (no downscale,
+ * no EXIF rotation); GIF/BMP are repainted to PNG because their first frame and
+ * transparency are more predictable that way; WebP passes through as-is.
  */
 export declare function prepareUpload(path: string, maxEdge: number): PreparedUpload;
 /**
- * Crop a region of a PNG locally (optionally upscaled), then prepare the
- * crop for upload. The crop REPLACES the image: the model sees only this
- * region, at full resolution. The view transform maps model boxes back to
- * original-image coordinates. PNG only — region cropping of other formats
- * is not possible without a codec.
+ * Crop a region locally (optionally upscaled), then prepare the crop for
+ * upload. Works on every decodable format (PNG, JPEG, GIF, BMP); WebP is
+ * rejected with an actionable message. The crop REPLACES the image: the model
+ * sees only this region, at full resolution. The view transform maps model
+ * boxes back to original-image coordinates.
  */
 export declare function prepareCropUpload(path: string, box: {
     x1: number;
